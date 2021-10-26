@@ -1,3 +1,17 @@
+<<<<<<< HEAD
+.ipynb_checkpoints
+.DS_Store
+.vscode
+__pycache__
+output
+.style.yapf
+format.sh
+save
+*.mid
+checkpoints/eval
+*.wav
+experiments/
+=======
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -127,3 +141,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+>>>>>>> 3316bd7a60a51dbfb8ae6c5f0fb71190608a2874
