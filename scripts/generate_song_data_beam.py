@@ -26,7 +26,7 @@ from magenta.models.music_vae import TrainedModel
 import note_seq
 
 from .. import config
-from ../utils/ import song_utils
+from ..utils import song_utils
 
 FLAGS = flags.FLAGS
 
@@ -97,10 +97,11 @@ class EncodeSong(beam.DoFn):
 
 
 def main(argv):
-  del argv  # unused
+  #del argv  # unused
 
   pipeline_options = beam.options.pipeline_options.PipelineOptions(
       FLAGS.pipeline_options.split(','))
+  print(pipeline_options)
 
   with beam.Pipeline(options=pipeline_options) as p:
     p |= 'tfrecord_list' >> beam.Create(FLAGS.input)
