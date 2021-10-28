@@ -63,20 +63,27 @@ def extract_melodies(note_sequence, keep_longest_split=False):
   Returns:
     List of monophonic NoteSequence objects.
   """
+
+  # Split sequence of notes when there is a tempo change
   splits = note_seq.sequences_lib.split_note_sequence_on_time_changes(
       note_sequence)
 
   if keep_longest_split:
-    ns = max(splits, key=lambda x: len(x.notes))
+    ns = max(splits, key=lambda x: len(x.notes)) # NS is note sequence
     splits = [ns]
 
   melodies = []
+
   for split_ns in splits:
+
+    # QS is quantized sequence (i.e. Autotuned)
     qs = note_seq.sequences_lib.quantize_note_sequence(split_ns,
                                                        steps_per_quarter=4)
 
     instruments = list(set([note.instrument for note in qs.notes]))
 
+    # Create an individual melody for each instrument playing the quantized
+    # notes at each split
     for instrument in instruments:
       melody = note_seq.melodies_lib.Melody()
       try:

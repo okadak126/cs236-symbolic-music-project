@@ -57,6 +57,8 @@ class EncodeSong(beam.DoFn):
                               checkpoint_dir_or_path=FLAGS.checkpoint)
 
   def process(self, ns):
+    # ns refers to a notesequence
+
     logging.info('Processing %s::%s (%f)', ns.id, ns.filename, ns.total_time)
     if ns.total_time > 60 * 60:
       logging.info('Skipping notesequence with >1 hour duration')
@@ -65,18 +67,29 @@ class EncodeSong(beam.DoFn):
 
     Metrics.counter('EncodeSong', 'encoding_song').inc()
 
+    # Default Mode is Melody
     if FLAGS.mode == 'melody':
+
+      # Chunk length = The number of measures in each tokenized chunk of MIDI
+      #(dependent on the model configuration).
       chunk_length = 2
+
+      # Generate separate quantized melodies for each instrument
       melodies = song_utils.extract_melodies(ns)
+
       if not melodies:
         Metrics.counter('EncodeSong', 'extracted_no_melodies').inc()
         return
       Metrics.counter('EncodeSong', 'extracted_melody').inc(len(melodies))
+      
       songs = [
           song_utils.Song(melody, self.model_config.data_converter,
                           chunk_length) for melody in melodies
       ]
+
+      # Actually uses the MusicVAE to encode songs (using pretrained VAE)
       encoding_matrices = song_utils.encode_songs(self.model, songs)
+
     elif FLAGS.mode == 'multitrack':
       chunk_length = 1
       song = song_utils.Song(ns,
@@ -84,21 +97,24 @@ class EncodeSong(beam.DoFn):
                              chunk_length,
                              multitrack=True)
       encoding_matrices = song_utils.encode_songs(self.model, [song])
+
     else:
       raise ValueError(f'Unsupported mode: {FLAGS.mode}')
 
     for matrix in encoding_matrices:
+
+      # What is this shape? z, mu, and sigma for each of 512 chunks I assume
       assert matrix.shape[0] == 3 and matrix.shape[-1] == 512
       if matrix.shape[1] == 0:
         Metrics.counter('EncodeSong', 'skipped_matrix').inc()
         continue
       Metrics.counter('EncodeSong', 'encoded_matrix').inc()
+
       yield pickle.dumps(matrix)
 
 
 def main(argv):
-  #del argv  # unused
-  print("hello")
+  del argv  # unused
 
   pipeline_options = beam.options.pipeline_options.PipelineOptions(
       FLAGS.pipeline_options.split(','))

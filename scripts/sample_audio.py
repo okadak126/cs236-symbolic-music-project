@@ -40,7 +40,7 @@ import utils.song_utils as song_utils
 import utils.train_utils as train_utils
 import utils.metrics as metrics
 import config
-import train_lm
+# import train_lm # I don't know what this is or why it's here
 
 FLAGS = flags.FLAGS
 SYNTH = note_seq.fluidsynth
