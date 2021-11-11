@@ -160,6 +160,10 @@ def toy_sequence_distribution_fn(trajectory_length=10, batch_size=512):
 def main(argv):
   del argv  # unused
 
+  # Assumes we have used generate_song_data_beam.py to create training
+  # and eval TFRecord files in the specified encoded_data directory
+
+  # Default mode is 'flatten' - documentation says to use 'sequences'
   if FLAGS.mode == 'decoded':
     train_glob = f'{FLAGS.encoded_data}/decoded-train.tfrecord-*'
     eval_glob = f'{FLAGS.encoded_data}/decoded-eval.tfrecord-*'
@@ -192,13 +196,17 @@ def main(argv):
     count = 0
     discard = 0
     example_count, should_terminate = 0, False
+
     for song_data in ds.as_numpy_iterator():
       song_embeddings = song_data[0]
 
+      # Default mode is "flatten", we use "sequences"
       if FLAGS.mode != 'decoded':
+
+        # For z, mu, sigma - we have n embeddings of dimension 512 (3, n, 512)
         assert song_embeddings.ndim == 3 and song_embeddings.shape[0] == 3
 
-        # Use the full VAE embedding
+        # Use the full VAE embedding (just take z)
         song = song_embeddings[0]
 
       else:
@@ -207,6 +215,7 @@ def main(argv):
           discard += 1
           continue
 
+        # 1024 is the desired dimension
         pad_len = 1024 - song.shape[0]
         padding = np.zeros((pad_len, song.shape[-1]))
         padding[:, 0] = 1.
@@ -229,6 +238,8 @@ def main(argv):
             break
           example_count += 1
           targets.append(vec)
+
+      # We split into small context windows (32 - len song is 512, 16 contexts)
       elif FLAGS.mode == 'sequences':
         for i in range(0, len(song) - ctx_window, stride):
           context = song[i:i + ctx_window]

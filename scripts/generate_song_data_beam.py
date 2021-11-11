@@ -103,7 +103,7 @@ class EncodeSong(beam.DoFn):
 
     for matrix in encoding_matrices:
 
-      # What is this shape? z, mu, and sigma for each of 512 chunks I assume
+      # What is this shape? z, mu, and dimension of each is n x 512
       assert matrix.shape[0] == 3 and matrix.shape[-1] == 512
       if matrix.shape[1] == 0:
         Metrics.counter('EncodeSong', 'skipped_matrix').inc()

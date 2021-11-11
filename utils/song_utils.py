@@ -158,6 +158,8 @@ def chunks_to_embeddings(sequences, model, data_converter):
 
   Returns:
     A numpy matrix of shape [len(sequences), latent_dims].
+    [Actually 3 numpy matrices of this shape], one for the
+    estimated latents z, 2 for their mu and sigma
   """
   assert model is not None, 'No model provided.'
 
