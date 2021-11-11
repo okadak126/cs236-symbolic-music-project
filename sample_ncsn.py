@@ -111,8 +111,12 @@ def evaluate(writer, real, collection, baseline, valid_real):
     writer.image('init', im, step=0)
 
   init = collection[0]
-  prd_init = metrics.precision_recall_distribution(real, init)
-  prd_perfect = metrics.precision_recall_distribution(real, real)
+  #prd_init = metrics.precision_recall_distribution(real, init)
+  #prd_perfect = metrics.precision_recall_distribution(real, real)
+
+  frechet_dist = 0
+  mmd_rbf = 0
+  mmd_polynomial = 0
 
   for model, test_points in [('baseline', [baseline]),
                              ('ncsn', gen_test_points),
@@ -123,62 +127,65 @@ def evaluate(writer, real, collection, baseline, valid_real):
 
     for i, samples in enumerate(test_points):
       # Render samples
-      if samples.shape[-1] == 2:
-        im_buf = plot_utils.scatter_2d(samples)
-        im = tf.image.decode_png(im_buf.getvalue(), channels=4)
-        writer.image(f'{log_dir}fake', im, step=i)
+      #if samples.shape[-1] == 2:
+      #  im_buf = plot_utils.scatter_2d(samples)
+      #  im = tf.image.decode_png(im_buf.getvalue(), channels=4)
+      #  writer.image(f'{log_dir}fake', im, step=i)
 
       # K-means histogram evaluation.
-      prd_dist = metrics.precision_recall_distribution(real, samples)
-      buf = io.BytesIO()
-      metrics.prd.plot([prd_dist, prd_init, prd_perfect],
-                       [model, 'noise', 'real'])
-      plt.savefig(buf, format='png')
-      plt.close()
-      buf.seek(0)
-      im = tf.image.decode_png(buf.getvalue(), channels=4)
-      writer.image(f'{log_dir}prd', im, step=i)
+      #prd_dist = metrics.precision_recall_distribution(real, samples)
+      #buf = io.BytesIO()
+      #metrics.prd.plot([prd_dist, prd_init, prd_perfect],
+      #                 [model, 'noise', 'real'])
+      #plt.savefig(buf, format='png')
+      #plt.close()
+      #buf.seek(0)
+      #im = tf.image.decode_png(buf.getvalue(), channels=4)
+      #writer.image(f'{log_dir}prd', im, step=i)
 
-      recall, precision = metrics.prd_f_beta_score(prd_dist)  # F8, F1/8 scores.
-      f1 = metrics.f1_score(precision, recall)
-      writer.scalar(f'{log_dir}precision', precision, step=i)
-      writer.scalar(f'{log_dir}recall', recall, step=i)
-      writer.scalar(f'{log_dir}f1', f1, step=i)
+      #recall, precision = metrics.prd_f_beta_score(prd_dist)  # F8, F1/8 scores.
+      #f1 = metrics.f1_score(precision, recall)
+      #writer.scalar(f'{log_dir}precision', precision, step=i)
+      #writer.scalar(f'{log_dir}recall', recall, step=i)
+      #writer.scalar(f'{log_dir}f1', f1, step=i)
 
       # Nearest neighbor evaluation.
-      improved_p, improved_r = metrics.precision_recall(real, samples)
-      improved_f1 = metrics.f1_score(improved_p, improved_r)
-      writer.scalar(f'{log_dir}improved_precision', improved_p, step=i)
-      writer.scalar(f'{log_dir}improved_recall', improved_r, step=i)
-      writer.scalar(f'{log_dir}improved_f1', improved_f1, step=i)
+      #improved_p, improved_r = metrics.precision_recall(real, samples)
+      #improved_f1 = metrics.f1_score(improved_p, improved_r)
+      #writer.scalar(f'{log_dir}improved_precision', improved_p, step=i)
+      #writer.scalar(f'{log_dir}improved_recall', improved_r, step=i)
+      #writer.scalar(f'{log_dir}improved_f1', improved_f1, step=i)
 
-      realism_scores = metrics.realism_scores(real, samples)
-      realism = realism_scores.mean()
-      writer.scalar(f'{log_dir}ipr_realism', realism, step=i)
+      #realism_scores = metrics.realism_scores(real, samples)
+      #realism = realism_scores.mean()
+      #writer.scalar(f'{log_dir}ipr_realism', realism, step=i)
 
-      ndb_over_k = metrics.ndb_score(real, samples, k=50)
-      writer.scalar(f'{log_dir}ndb', ndb_over_k, step=i)
+      #ndb_over_k = metrics.ndb_score(real, samples, k=50)
+      #writer.scalar(f'{log_dir}ndb', ndb_over_k, step=i)
 
       # Distance evaluation.
       frechet_dist = metrics.frechet_distance(real, samples)
       writer.scalar(f'{log_dir}frechet_distance', frechet_dist, step=i)
+      print(i, frechet_dist)
 
       mmd_rbf = metrics.mmd_rbf(real, samples)
       writer.scalar(f'{log_dir}mmd_rbf', mmd_rbf, step=i)
 
       mmd_polynomial = metrics.mmd_polynomial(real, samples)
       writer.scalar(f'{log_dir}mmd_polynomial', mmd_polynomial, step=i)
+      print(i, mmd_polynomial)
+
 
   writer.flush()
 
   stats = {
-      'precision': precision,
-      'recall': recall,
-      'f1': f1,
-      'improved_precision': improved_p,
-      'improved_recall': improved_r,
-      'improved_f1': improved_f1,
-      'realism': realism,
+      #'precision': precision,
+      #'recall': recall,
+      #'f1': f1,
+      #'improved_precision': improved_p,
+      #'improved_recall': improved_r,
+      #'improved_f1': improved_f1,
+      #'realism': realism,
       'frechet_dist': frechet_dist,
       'mmd_rbf': mmd_rbf,
       'mmd_polynomial': mmd_polynomial

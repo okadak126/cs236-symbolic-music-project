@@ -26,8 +26,11 @@ def frechet_distance(real, fake):
   
   Lower score is better.
   """
-  mu1, sigma1 = np.mean(real, axis=0), np.cov(real, rowvar=False)
-  mu2, sigma2 = np.mean(fake, axis=0), np.cov(fake, rowvar=False)
+  real_rs = np.reshape(real, (real.shape[0], real.shape[1] * real.shape[2]))
+  fake_rs = np.reshape(fake, (fake.shape[0], fake.shape[1] * fake.shape[2]))
+
+  mu1, sigma1 = np.mean(real_rs, axis=0), np.cov(real_rs, rowvar=False)
+  mu2, sigma2 = np.mean(fake_rs, axis=0), np.cov(fake_rs, rowvar=False)
   diff = mu1 - mu2
   covmean, _ = scipy.linalg.sqrtm(sigma1.dot(sigma2), disp=False)
 
@@ -60,9 +63,12 @@ def mmd_rbf(real, fake, gamma=1.0):
   
   Lower score is better.
   """
-  XX = metrics.pairwise.rbf_kernel(real, real, gamma)
-  YY = metrics.pairwise.rbf_kernel(fake, fake, gamma)
-  XY = metrics.pairwise.rbf_kernel(real, fake, gamma)
+  real_rs = np.reshape(real, (real.shape[0], real.shape[1] * real.shape[2]))
+  fake_rs = np.reshape(fake, (fake.shape[0], fake.shape[1] * fake.shape[2]))
+
+  XX = metrics.pairwise.rbf_kernel(real_rs, real_rs, gamma)
+  YY = metrics.pairwise.rbf_kernel(fake_rs, fake_rs, gamma)
+  XY = metrics.pairwise.rbf_kernel(real_rs, fake_rs, gamma)
   return XX.mean() + YY.mean() - 2 * XY.mean()
 
 
@@ -71,9 +77,12 @@ def mmd_polynomial(real, fake, degree=2, gamma=1, coef0=0):
   
   Lower score is better.
   """
-  XX = metrics.pairwise.polynomial_kernel(real, real, degree, gamma, coef0)
-  YY = metrics.pairwise.polynomial_kernel(fake, fake, degree, gamma, coef0)
-  XY = metrics.pairwise.polynomial_kernel(real, fake, degree, gamma, coef0)
+  real_rs = np.reshape(real, (real.shape[0], real.shape[1] * real.shape[2]))
+  fake_rs = np.reshape(fake, (fake.shape[0], fake.shape[1] * fake.shape[2]))
+
+  XX = metrics.pairwise.polynomial_kernel(real_rs, real_rs, degree, gamma, coef0)
+  YY = metrics.pairwise.polynomial_kernel(fake_rs, fake_rs, degree, gamma, coef0)
+  XY = metrics.pairwise.polynomial_kernel(real_rs, fake_rs, degree, gamma, coef0)
   return XX.mean() + YY.mean() - 2 * XY.mean()
 
 
