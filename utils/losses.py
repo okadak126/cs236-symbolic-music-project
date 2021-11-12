@@ -306,3 +306,101 @@ def diffusion_loss(batch,
   assert loss.shape == batch.shape[:1]
 
   return reduce_fn(loss, reduction)
+
+def denoising_score_matching_loss(batch,
+                                  model,
+                                  sigmas,
+                                  rng,
+                                  continuous_noise=False,
+                                  reduction="mean"):
+  """Denoising score matching objective used to train NCSNs.
+  
+  Args:
+    batch: A batch of data to compute the loss for.
+    model: A noise-conditioned score network.
+    sigmas: A noise schedule (list of standard deviations).
+    rng: Random number generator key to sample sigmas.
+    continuous_noise: If True, uses continuous noise conditioning.
+    reduction: Type of reduction to apply to loss.
+  
+  Returns:
+    Loss value. If `reduction` is `none`, this has the same shape as `data`;
+    otherwise, it is scalar.
+  """
+  rng, label_rng, sample_rng = jax.random.split(rng, num=3)
+  labels = jax.random.randint(key=label_rng,
+                              shape=(batch.shape[0],),
+                              minval=int(continuous_noise),
+                              maxval=len(sigmas))
+
+  if continuous_noise:
+    rng, noise_rng = jax.random.split(rng)
+    used_sigmas = jax.random.uniform(key=noise_rng,
+                                     shape=labels.shape,
+                                     minval=sigmas[labels - 1],
+                                     maxval=sigmas[labels])
+  else:
+    used_sigmas = sigmas[labels]
+
+  used_sigmas = used_sigmas.reshape(batch.shape[0],
+                                    *([1] * len(batch.shape[1:])))
+  noise = jax.random.normal(key=sample_rng, shape=batch.shape) * used_sigmas
+  perturbed_samples = batch + noise
+  target = -1 / (used_sigmas**2) * noise
+  scores = model(perturbed_samples, used_sigmas)
+
+  assert target.shape == batch.shape
+  assert scores.shape == batch.shape
+
+  # Compute loss
+  target = target.reshape(target.shape[0], -1)
+  scores = scores.reshape(scores.shape[0], -1)
+  loss = 0.5 * jnp.sum(jnp.square(scores - target),
+                       axis=-1) * used_sigmas.squeeze()**2
+  return reduce_fn(loss, reduction)
+
+def batch_mul(a, b):
+  return jax.vmap(lambda a, b: a * b)(a, b)
+
+
+def sde_loss(batch,
+  model,
+  sigmas,
+  rng,
+  continuous_noise=False,
+  reduction="mean"):
+
+
+  # Step 1 generate "timesteps" / "labels"
+  eps = 1e-5 # default set by song
+  T = 1 # default set by song
+  rng, step_rng = jax.random.split(rng)
+  t = jax.random.uniform(step_rng, (batch.shape[0],), minval=eps, maxval=T)
+
+  # Step 2 generate noise z
+  rng, sample_rng = jax.random.split(rng)
+  z = jax.random.normal(sample_rng, batch.shape)
+
+  # Step 3 generate mean and std at time t from forward SDE
+  sigma_min = 0.01 # default set by song
+  sigma_max = 50   # default set by song
+  mean = batch
+  std = sigma_min * (sigma_max / sigma_min) ** t # probably need numpy here
+
+  # Step 4 perturb the data
+  perturbed_data = mean + batch_mul(std, z)
+
+  # Step 5 compute the score
+  score = model(perturbed_data, std)  # condition on sigma_t == std
+
+  # Step 6 compute the loss
+  diffusion = std * jnp.sqrt(2 * (jnp.log(sigma_max) - jnp.log(sigma_min)))
+
+  loss = jnp.sum(jnp.square(score + batch_mul(z, 1. / std)), axis=-1) * (diffusion ** 2)
+
+  assert loss.shape == batch.shape[:1]
+
+  return reduce_fn(loss, reduction)
+
+
+
