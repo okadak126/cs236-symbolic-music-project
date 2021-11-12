@@ -359,23 +359,22 @@ def denoising_score_matching_loss(batch,
                        axis=-1) * used_sigmas.squeeze()**2
   return reduce_fn(loss, reduction)
 
-def batch_mul(a, b):
-  return jax.vmap(lambda a, b: a * b)(a, b)
-
-
-def sde_loss(batch,
+def vesde_loss(batch,
   model,
   sigmas,
   rng,
   continuous_noise=False,
   reduction="mean"):
 
+  def batch_mul(a, b):
+    return jax.vmap(lambda a, b: a * b)(a, b)
 
   # Step 1 generate "timesteps" / "labels"
   eps = 1e-5 # default set by song
   T = 1 # default set by song
   rng, step_rng = jax.random.split(rng)
   t = jax.random.uniform(step_rng, (batch.shape[0],), minval=eps, maxval=T)
+  t = t.reshape(batch.shape[0], *([1] * len(batch.shape[1:])))
 
   # Step 2 generate noise z
   rng, sample_rng = jax.random.split(rng)
@@ -396,7 +395,9 @@ def sde_loss(batch,
   # Step 6 compute the loss
   diffusion = std * jnp.sqrt(2 * (jnp.log(sigma_max) - jnp.log(sigma_min)))
 
-  loss = jnp.sum(jnp.square(score + batch_mul(z, 1. / std)), axis=-1) * (diffusion ** 2)
+  G2 = jnp.squeeze((diffusion ** 2))
+  losses = jnp.square(score + batch_mul(z, 1. / std))
+  loss = jnp.mean(losses, axis=tuple(range(1, len(losses.shape)))) * G2
 
   assert loss.shape == batch.shape[:1]
 
