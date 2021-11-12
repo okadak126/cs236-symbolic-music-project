@@ -271,6 +271,127 @@ def consistent_langevin_dynamics(rng,
   return state, ld_metrics
 
 
+
+@partial(jax.jit, static_argnums=(
+    4,
+    5,
+    6,
+    7,
+))
+
+def reverse_diffusion_sampler(rng,
+  model,
+  betas,
+  init,
+  epsilon,
+  T,
+  denoise,
+  infill=False,
+  infill_samples=None,
+  infill_masks=None):
+  """Diffusion dynamics (reverse process decoder).
+  
+  Args:
+    rng: Random number generator key.
+    model: Diffusion probabilistic network.
+    betas: Noise schedule.
+    init: Initial state for Langevin dynamics (usually Gaussian noise).
+    epsilon: Null parameter.
+    T: Null parameter.
+    denoise: Null parameter used in other methods to find EDS.
+    infill: Infill partially complete samples.
+    infill_samples: Partially complete samples to infill.
+    infill_masks: Binary mask for infilling partially complete samples.
+        A zero indicates an element that must be infilled by Langevin dynamics.
+  
+  Returns:
+    state: Final state sampled from Langevin dynamics.
+    collection: Array of state at each step of sampling with shape 
+        (num_sigmas * T + 1 + int(denoise), :).
+    ld_metrics: Metrics collected for each noise level with shape (num_sigmas, T).
+  """
+
+  def batch_mul(a, b):
+    return jax.vmap(lambda a, b: a * b)(a, b)
+  
+  if not infill:
+    infill_samples = jnp.zeros(init.shape)
+    infill_masks = jnp.zeros(init.shape)
+
+  eps = 1e-5 # default set by song
+  T = 1 # default set by song
+  N = 1000
+
+  #alphas = 1 - betas
+  #alphas_prod = jnp.cumprod(alphas)
+  #alphas_prod_prev = jnp.concatenate([jnp.ones((1,)), alphas_prod[:-1]])
+  #assert alphas.shape == alphas_prod.shape == alphas_prod_prev.shape
+
+  # Define timesteps for collection
+  collection_steps = 40
+  sigma_min = 0.01 # default set by song
+  sigma_max = 50   # default set by song
+
+  start = init * (1 - masks) + infill_samples * infill_masks
+  images = np.zeros((collection_steps + 1, *init.shape))
+  collection = jax.ops.index_update(images, jax.ops.index[0, :], start)
+  t_vec = jnp.linspace(T, eps, N).astype(jnp.int32) # This is betas
+  collection_idx = jnp.linspace(1, N, collection_steps).astype(jnp.int32)
+
+  def sample_step(params, i):
+
+    state, rng, collection = params
+
+    std = sigma_min * (sigma_max / sigma_min) ** t_vec[i]
+
+    # Reverse process (reconstruction)
+    diffusion = std * jnp.sqrt(2 * (jnp.log(sigma_max) - jnp.log(sigma_min)))
+    dt = 1 / N
+    G = diffusion * jnp.sqrt(dt)
+
+    score = model(infill_samples, std) 
+
+    rev_f = - batch_mul(G ** 2, score)
+    rev_G = G
+
+    rng, noise_rng = jax.random.split(rng)
+    z = random.normal(noise_rng, infill_samples.shape)
+
+    mean = infill_samples - rev_f
+    next_state = mean + batch_mul(rev_G, z)
+
+    # Infill
+    next_state = next_state * (1 - infill_masks) + infill_samples * infill_masks
+
+    # Collect metrics
+    step = state - next_state
+    grad_norm = jnp.sqrt(jnp.sum(jnp.square(score), axis=1) + 1e-10).mean()
+    noise_norm = jnp.sqrt(jnp.sum(jnp.square(z), axis=1) + 1e-10).mean()
+    step_norm = jnp.sqrt(jnp.sum(jnp.square(step), axis=1) + 1e-10).mean()
+    alpha_prod = std
+    metrics = (grad_norm, step_norm, alpha_prod, noise_norm)
+
+    # Collect samples
+    image_idx = N - i + 1
+    idx_mask = jnp.in1d(collection_idx, image_idx)
+    idx = jnp.sum(jnp.arange(len(collection_idx)) * idx_mask) + 1
+    collection = jax.lax.cond(idx_mask.any(),
+                              lambda op: jax.ops.index_update(
+                                  collection, jax.ops.index[op, :], next_state),
+                              lambda op: collection,
+                              operand=idx)
+
+    next_params = (next_state, rng, collection)
+    return next_params, metrics
+
+  init_params = (init, rng, collection)
+  t_steps = jnp.arange(N - 1, -1, -1)
+  ld_state, ld_metrics = jax.lax.scan(sample_step, init_params, t_steps)
+  state, rng, collection = ld_state
+  ld_metrics = jnp.stack(ld_metrics)
+  ld_metrics = jnp.expand_dims(ld_metrics, 2)
+  return state, collection, ld_metrics
+
 @partial(jax.jit, static_argnums=(
     4,
     5,
@@ -399,6 +520,117 @@ def diffusion_dynamics(rng,
   init_params = (init, rng, collection)
   beta_steps = jnp.arange(len(betas) - 1, -1, -1)
   ld_state, ld_metrics = jax.lax.scan(sample_with_beta, init_params, beta_steps)
+  state, rng, collection = ld_state
+  ld_metrics = jnp.stack(ld_metrics)
+  ld_metrics = jnp.expand_dims(ld_metrics, 2)
+  return state, collection, ld_metrics
+
+
+def reverse_diffusion_sampler(rng,
+  model,
+  betas,
+  init,
+  epsilon,
+  T,
+  denoise,
+  infill=False,
+  infill_samples=None,
+  infill_masks=None):
+  """Diffusion dynamics (reverse process decoder).
+  
+  Args:
+    rng: Random number generator key.
+    model: Diffusion probabilistic network.
+    betas: Noise schedule.
+    init: Initial state for Langevin dynamics (usually Gaussian noise).
+    epsilon: Null parameter.
+    T: Null parameter.
+    denoise: Null parameter used in other methods to find EDS.
+    infill: Infill partially complete samples.
+    infill_samples: Partially complete samples to infill.
+    infill_masks: Binary mask for infilling partially complete samples.
+        A zero indicates an element that must be infilled by Langevin dynamics.
+  
+  Returns:
+    state: Final state sampled from Langevin dynamics.
+    collection: Array of state at each step of sampling with shape 
+        (num_sigmas * T + 1 + int(denoise), :).
+    ld_metrics: Metrics collected for each noise level with shape (num_sigmas, T).
+  """
+
+  def batch_mul(a, b):
+    return jax.vmap(lambda a, b: a * b)(a, b)
+  
+  if not infill:
+    infill_samples = jnp.zeros(init.shape)
+    infill_masks = jnp.zeros(init.shape)
+
+  eps = 1e-5 # default set by song
+  T = 1 # default set by song
+  N = 500
+
+  # Define timesteps for collection
+  collection_steps = 40
+  sigma_min = 0.01 # default set by song
+  sigma_max = 50   # default set by song
+
+  start = init * (1 - infill_masks) + infill_samples * infill_masks
+  images = np.zeros((collection_steps + 1, *init.shape))
+  collection = jax.ops.index_update(images, jax.ops.index[0, :], start)
+  t_vec = jnp.linspace(T, eps, N).astype(jnp.int32) # Specific timesteps
+  collection_idx = jnp.linspace(1, N, collection_steps).astype(jnp.int32) # indices where we collect samples
+
+  def sample_step(params, i):
+
+    state, rng, collection = params
+
+    t = jnp.tile(t_vec[i], (state.shape[0], 1, 1))
+
+    std = sigma_min * (sigma_max / sigma_min) ** t
+
+    # Reverse process (reconstruction)
+    diffusion = std * jnp.sqrt(2 * (jnp.log(sigma_max) - jnp.log(sigma_min)))
+    dt = 1 / N
+    G = diffusion * jnp.sqrt(dt)
+
+    score = model(state, std) 
+
+    rev_f = - batch_mul(G ** 2, score)
+    rev_G = G
+
+    rng, noise_rng = jax.random.split(rng)
+    z = jax.random.normal(noise_rng, state.shape)
+
+    mean = state - rev_f
+    next_state = mean + batch_mul(rev_G, z)
+
+    # Infill
+    next_state = next_state * (1 - infill_masks) + infill_samples * infill_masks
+
+    # Collect metrics
+    step = state - next_state
+    grad_norm = jnp.sqrt(jnp.sum(jnp.square(score), axis=1) + 1e-10).mean()
+    noise_norm = jnp.sqrt(jnp.sum(jnp.square(z), axis=1) + 1e-10).mean()
+    step_norm = jnp.sqrt(jnp.sum(jnp.square(step), axis=1) + 1e-10).mean()
+    alpha_prod = std[0].squeeze()
+    metrics = (grad_norm, step_norm, alpha_prod, noise_norm)
+
+    # Collect samples
+    image_idx = N - i + 1
+    idx_mask = jnp.in1d(collection_idx, image_idx)
+    idx = jnp.sum(jnp.arange(len(collection_idx)) * idx_mask) + 1
+    collection = jax.lax.cond(idx_mask.any(),
+                              lambda op: jax.ops.index_update(
+                                  collection, jax.ops.index[op, :], next_state),
+                              lambda op: collection,
+                              operand=idx)
+
+    next_params = (next_state, rng, collection)
+    return next_params, metrics
+
+  init_params = (init, rng, collection)
+  t_steps = jnp.arange(N - 1, -1, -1)
+  ld_state, ld_metrics = jax.lax.scan(sample_step, init_params, t_steps)
   state, rng, collection = ld_state
   ld_metrics = jnp.stack(ld_metrics)
   ld_metrics = jnp.expand_dims(ld_metrics, 2)

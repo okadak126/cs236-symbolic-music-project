@@ -48,7 +48,7 @@ FLAGS = flags.FLAGS
 flags.DEFINE_integer('seed', 0, 'Random seed for network initialization.')
 
 # Training
-flags.DEFINE_enum('loss', 'dsm', ['dsm', 'ssm', 'ddpm'], 'Loss function.')
+flags.DEFINE_enum('loss', 'dsm', ['dsm', 'ssm', 'ddpm', 'vesde'], 'Loss function.')
 flags.DEFINE_boolean('continuous_noise', True, 'Continuous noise conditioning.')
 flags.DEFINE_float('learning_rate', 3e-4, 'Learning rate for optimizer.')
 flags.DEFINE_integer('batch_size', 128, 'Batch size for training.')
@@ -89,7 +89,7 @@ flags.DEFINE_float('ld_epsilon', 2e-6,
                    'Step size for annealed Langevin dynamics.')  # Technique 4
 
 # Sampling
-flags.DEFINE_enum('sampling', 'ald', ['ald', 'cas', 'ddpm'],
+flags.DEFINE_enum('sampling', 'ald', ['ald', 'cas', 'ddpm', 'vesde'],
                   'Sampling algorithm to use.')
 flags.DEFINE_boolean('ema', True,
                      'Exponential moving average smoothing.')  # Technique 5
@@ -238,7 +238,9 @@ def evaluate(dataset, model, sigmas, rng):
   elif FLAGS.loss == 'ssm':
     objective = sliced_score_matching_loss
   elif FLAGS.loss == 'ddpm':
-    objective = diffusion_loss
+    objective = diffusion_los
+  elif FLAGS.loss == 'vesde':
+    objective = vesde_loss
   else:
     raise ValueError(f'Unsupported objective {FLAGS.loss}')
 
@@ -348,6 +350,9 @@ def train(train_batches, valid_batches, sigmas, output_dir=None, verbose=True):
     objective = sliced_score_matching_loss
   elif FLAGS.loss == 'ddpm':
     objective = diffusion_loss
+  elif FLAGS.loss == 'vesde':
+    objective = vesde_loss
+
   else:
     raise ValueError(f'Unsupported objective {FLAGS.loss}')
 
@@ -530,13 +535,15 @@ def sample(scorenet,
     sampling_algorithm = ebm_utils.consistent_langevin_dynamics
   elif sampling == 'ddpm':
     sampling_algorithm = ebm_utils.diffusion_dynamics
+  elif sampling == 'vesde':
+    sampling_algorithm = ebm_utils.reverse_diffusion_sampler
   else:
     raise ValueError(f'Unknown sampling algorithm: {sampling}')
 
   init_rng, ld_rng = jax.random.split(rng)
 
   # Initial state has mean=0, var=1.
-  if sampling == 'ddpm':
+  if sampling == 'ddpm' or sampling == 'vesde':
     init = jax.random.normal(key=init_rng, shape=(num_samples, *sample_shape))
   else:
     rho = jnp.sqrt(12) / 2

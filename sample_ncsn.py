@@ -229,6 +229,8 @@ def infill_samples(samples, masks, rng_seed=1):
     sampling_algorithm = ebm_utils.consistent_langevin_dynamics
   elif FLAGS.sampling == 'ddpm':
     sampling_algorithm = ebm_utils.diffusion_dynamics
+  elif FLAGS.sampling == 'vesde':
+    sampling_algorithm = ebm_utils.reverse_diffusion_sampler
   else:
     raise ValueError(f'Unknown sampling algorithm: {FLAGS.sampling}')
 
