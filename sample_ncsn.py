@@ -65,6 +65,9 @@ flags.DEFINE_boolean('flush', True, 'Flush generated samples to disk.')
 flags.DEFINE_boolean('animate', False, 'Generate animation of samples.')
 flags.DEFINE_boolean('infill', False, 'Infill.')
 flags.DEFINE_boolean('interpolate', False, 'Interpolate.')
+flags.DEFINE_boolean('splice', False, 'Splice.')
+flags.DEFINE_boolean('splice_mask', False, 'Splice infill.')
+
 
 
 def evaluate(writer, real, collection, baseline, valid_real):
@@ -195,6 +198,13 @@ def evaluate(writer, real, collection, baseline, valid_real):
   }
   return stats
 
+def splice(batch):
+    spliced_samples = jnp.zeros_like(batch)
+    for i in range(0,batch.shape[0], 2):
+        spliced_samples = spliced_samples.at[i].set(jnp.concatenate([batch[i][:16],batch[i+1][16:]]))
+        spliced_samples = spliced_samples.at[i+1].set(jnp.concatenate([batch[i+1][:16],batch[i][16:]]))
+    
+    return spliced_samples
 
 def infill_samples(samples, masks, rng_seed=1):
   rng = jax.random.PRNGKey(rng_seed)
@@ -446,6 +456,34 @@ def main(argv):
     generated, collection, ld_metrics = diffusion_decoder(
         interp_zs, rng_seed=FLAGS.sample_seed)
     generated, collection = np.stack(generated), np.stack(collection)
+
+  elif FLAGS.splice: #Splice.
+        if real.shape[0] % 2 == 1:
+            real = real[:-1]
+        starts = splice(np.copy(real))
+        if FLAGS.splice_mask:
+            # Infill middle 16 latents
+              idx = list(range(32))  
+              fixed_idx = idx[:8] + idx[-8:]
+              masks = np.zeros(starts.shape)
+              masks[:, fixed_idx, :] = 1  # hold fixed
+              generated, collection, ld_metrics = infill_samples(
+                    starts, masks, rng_seed=FLAGS.sample_seed)
+        else:
+            starts_z = diffusion_stochastic_encoder(starts, rng_seed=FLAGS.sample_seed)
+            interp_zs = [starts_z]
+                         #np.linspace(0., 1., 9)]
+            #9, 1, 32, 42
+            #print(np.array(interp_zs).shape)
+            generated, collection, ld_metrics = diffusion_decoder(
+                interp_zs, rng_seed=FLAGS.sample_seed)
+        
+            generated, collection = np.stack(generated), np.stack(collection)
+        
+            #9, 1, 32, 42
+            #print(generated.shape)
+            generated = generated.reshape(starts.shape)
+            #collection = collection.reshape(starts.shape)
 
   else:  # Unconditional generation.
     generated, collection, ld_metrics = generate_samples(

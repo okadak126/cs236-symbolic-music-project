@@ -434,5 +434,5 @@ class Song(object):
       del tensors  # unused
       data = note_seq.sequences_lib.concatenate_sequences(chunks)
 
-    note_seq.play_sequence(data, synth=note_seq.fluidsynth)
+    # note_seq.play_sequence(data, synth=note_seq.fluidsynth)
     return data

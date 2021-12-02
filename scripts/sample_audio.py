@@ -41,6 +41,8 @@ import utils.train_utils as train_utils
 import utils.metrics as metrics
 import config
 # import train_lm # I don't know what this is or why it's here
+import plotly
+import plotly.graph_objs as go
 
 FLAGS = flags.FLAGS
 SYNTH = note_seq.fluidsynth
@@ -58,6 +60,8 @@ flags.DEFINE_boolean('gen_only', False, 'Only generate the fake audio.')
 flags.DEFINE_boolean('melody', True, 'If True, decode melodies.')
 flags.DEFINE_boolean('infill', False, 'Evaluate quality of infilled measures.')
 flags.DEFINE_boolean('interpolate', False, 'Evaluate interpolations.')
+flags.DEFINE_boolean('splice', False, 'Evaluate quality of spliced measures.')
+flags.DEFINE_boolean('splice_mask', False, 'Evaluate quality of spliced measures.')
 
 
 def synthesize_ns(path, ns, synth=SYNTH, sample_rate=SAMPLE_RATE):
@@ -102,6 +106,50 @@ def decode_emb(emb, model, data_converter, chunks_only=False):
   return samples
 
 
+def unsplice(gen_samples, real_samples):
+    generated_samples = jnp.zeros_like(gen_samples)
+    for i in range(0,gen_samples.shape[0], 2):
+        generated_samples = generated_samples.at[i].set(jnp.concatenate([real_samples[i][:8],gen_samples[i][8:24],real_samples[i+1][24:]]))
+        generated_samples = generated_samples.at[i+1].set(jnp.concatenate([real_samples[i+1][:8],gen_samples[i+1][8:24],real_samples[i][24:]]))
+    
+    return generated_samples
+
+def plot_midi(sequence, plot_path):
+  """Generates a pandas dataframe from a sequence."""
+  x_coords = []
+  y_coords = []
+  color = 'rgba(171, 15, 39,1)'
+  #TODO: 
+  # add x, y axis labels
+  for note in sequence.notes:
+    x_coords.append(note.start_time)
+    x_coords.append(note.start_time)
+    x_coords.append(note.end_time)
+    x_coords.append(note.end_time)
+    
+    y_coords.append(note.pitch-0.4)
+    y_coords.append(note.pitch+0.4)
+    y_coords.append(note.pitch+0.4)
+    y_coords.append(note.pitch-0.4)
+    x_coords.append(note.start_time)
+    y_coords.append(note.pitch-0.4)
+    x_coords.append(None)
+    y_coords.append(None)
+    # pd_dict['start_time'].append(note.start_time)
+    # pd_dict['end_time'].append(note.end_time)
+    # pd_dict['duration'].append(note.end_time - note.start_time)
+    # pd_dict['pitch'].append(note.pitch)
+    # pd_dict['bottom'].append(note.pitch - 0.4)
+    # pd_dict['top'].append(note.pitch + 0.4)
+    # pd_dict['velocity'].append(note.velocity)
+    # pd_dict['fill_alpha'].append(note.velocity / 128.0)
+    # pd_dict['instrument'].append(note.instrument)
+    # pd_dict['program'].append(note.program)
+  fig = go.Figure(go.Scatter(x=x_coords, y=y_coords, fill="toself", fillcolor = color, line_color = color))
+	#fig.show()
+  plotly.io.write_image(fig, f'{plot_path}.png', engine = 'kaleido')
+  return
+
 @ray.remote
 def parallel_synth(song, i, ns_dir, audio_dir, image_dir, include_wav,
                    include_plots):
@@ -113,8 +161,7 @@ def parallel_synth(song, i, ns_dir, audio_dir, image_dir, include_wav,
   ns = song.play()
 
   if include_plots:
-    fig = note_seq.plot_sequence(ns, show_figure=False)
-    export_png(fig, filename=plot_path)
+    plot_midi(ns, plot_path)
 
   if include_wav:
     synthesize_ns(audio_path, ns)
@@ -147,8 +194,9 @@ def main(argv):
   generated = data_utils.load(os.path.join(log_dir, 'generated.pkl'))
   
   collection = data_utils.load(os.path.join(log_dir, 'collection.pkl'))
-  idx = np.linspace(0, 40, 10).astype(np.int32)
-  collection = collection[idx]
+  #TODO:  These don't do anything but throw sometimes
+  #idx = np.linspace(0, 40, 10).astype(np.int32)
+  #collection = collection[idx]
 
 
   # Get baselines.
@@ -165,6 +213,11 @@ def main(argv):
     # Prior baseline.
     prior = np.random.randn(*generated.shape)
     prior[:, fixed_idx, :] = real[:, fixed_idx, :]    
+  elif FLAGS.splice_mask:
+    generated = unsplice(generated, real)
+    # Prior baseline.
+    prior = np.random.randn(*generated.shape)
+    prior = unsplice(prior, real)
   else:
     prior = np.random.randn(*generated.shape)
 
