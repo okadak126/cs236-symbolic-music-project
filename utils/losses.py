@@ -395,7 +395,7 @@ def vesde_loss(batch,
   # Step 6 compute the loss
   diffusion = std * jnp.sqrt(2 * (jnp.log(sigma_max) - jnp.log(sigma_min)))
 
-  G2 = jnp.squeeze((diffusion ** 2))
+  G2 = jnp.squeeze(diffusion ** 2)
   losses = jnp.square(score + batch_mul(z, 1. / std))
   loss = jnp.mean(losses, axis=tuple(range(1, len(losses.shape)))) * G2
 

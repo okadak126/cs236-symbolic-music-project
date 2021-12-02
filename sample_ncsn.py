@@ -52,6 +52,7 @@ flags.DEFINE_integer('sample_seed', 1,
                      'Random number generator seed for sampling.')
 flags.DEFINE_string('sampling_dir', 'samples', 'Sampling directory.')
 flags.DEFINE_integer('sample_size', 1000, 'Number of samples.')
+flags.DEFINE_integer('t0', 500, 'step from which we start to sample')
 
 # Metrics.
 flags.DEFINE_boolean('compute_metrics', False,
@@ -166,6 +167,7 @@ def evaluate(writer, real, collection, baseline, valid_real):
       # Distance evaluation.
       frechet_dist = metrics.frechet_distance(real, samples)
       writer.scalar(f'{log_dir}frechet_distance', frechet_dist, step=i)
+      print("Frechet")
       print(i, frechet_dist)
 
       mmd_rbf = metrics.mmd_rbf(real, samples)
@@ -173,6 +175,7 @@ def evaluate(writer, real, collection, baseline, valid_real):
 
       mmd_polynomial = metrics.mmd_polynomial(real, samples)
       writer.scalar(f'{log_dir}mmd_polynomial', mmd_polynomial, step=i)
+      print("MMD Poly")
       print(i, mmd_polynomial)
 
 
@@ -218,9 +221,10 @@ def infill_samples(samples, masks, rng_seed=1):
       FLAGS.model_dir, (optimizer, ema, early_stop))
 
   # Create noise schedule
+  print(int(FLAGS.num_sigmas / FLAGS.t0) * FLAGS.num_sigmas)
   sigmas = ebm_utils.create_noise_schedule(FLAGS.sigma_begin,
                                            FLAGS.sigma_end,
-                                           FLAGS.num_sigmas,
+                                           int(FLAGS.num_sigmas / FLAGS.t0 * FLAGS.num_sigmas),
                                            schedule=FLAGS.schedule_type)
 
   if FLAGS.sampling == 'ald':
@@ -228,17 +232,17 @@ def infill_samples(samples, masks, rng_seed=1):
   elif FLAGS.sampling == 'cas':
     sampling_algorithm = ebm_utils.consistent_langevin_dynamics
   elif FLAGS.sampling == 'ddpm':
-    sampling_algorithm = ebm_utils.diffusion_dynamics
+    sampling_algorithm = ebm_utils.diffusion_dynamics_sdedit
   elif FLAGS.sampling == 'vesde':
     sampling_algorithm = ebm_utils.reverse_diffusion_sampler
   else:
     raise ValueError(f'Unknown sampling algorithm: {FLAGS.sampling}')
 
   init_rng, ld_rng = jax.random.split(rng)
-  init = jax.random.uniform(key=init_rng, shape=samples.shape)
+  init = sigmas[FLAGS.num_sigmas] * jax.random.uniform(key=init_rng, shape=samples.shape)
   generated, collection, ld_metrics = sampling_algorithm(ld_rng,
                                                          optimizer.target,
-                                                         sigmas,
+                                                         sigmas[:FLAGS.num_sigmas],
                                                          init,
                                                          FLAGS.ld_epsilon,
                                                          FLAGS.ld_steps,
@@ -307,7 +311,7 @@ def diffusion_decoder(z_list, rng_seed=1):
 
   gen, collects, sampling_metrics = [], [], []
   for i, z in enumerate(z_list):
-    generated, collection, ld_metrics = ebm_utils.diffusion_dynamics(
+    generated, collection, ld_metrics = ebm_utils.diffusion_dynamics_sdedit(
         ld_rng, optimizer.target, betas, z, FLAGS.ld_epsilon, FLAGS.ld_steps,
         FLAGS.denoise, False)
     ld_metrics = ebm_utils.collate_sampling_metrics(ld_metrics)
@@ -482,7 +486,7 @@ def main(argv):
   # Run evaluation metrics.
   if FLAGS.compute_metrics:
     train_ncsn.log_langevin_dynamics(ld_metrics, 0, log_dir)
-    metrics = evaluate(writer, real, collection, None, real)
+    metrics = evaluate(writer, real, collection, None, samples)
     train_utils.log_metrics(metrics, 1, 1)
 
 

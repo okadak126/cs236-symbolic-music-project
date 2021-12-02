@@ -39,7 +39,7 @@ import input_pipeline
 import utils.ebm_utils as ebm_utils
 import utils.plot_utils as plot_utils
 import utils.train_utils as train_utils
-from utils.losses import denoising_score_matching_loss, sliced_score_matching_loss, diffusion_loss
+from utils.losses import denoising_score_matching_loss, sliced_score_matching_loss, diffusion_loss, vesde_loss
 import utils.data_utils as data_utils
 import models.ncsn as ncsn
 
@@ -105,7 +105,7 @@ flags.DEFINE_list('data_shape', [
 flags.DEFINE_enum('problem', 'toy', ['toy', 'mnist', 'vae'],
                   'Problem to solve.')
 flags.DEFINE_string(
-    'dataset', './output/mix2d',
+    'dataset', '',
     'Path to directory containing data as train/eval tfrecord files.')
 flags.DEFINE_string('pca_ckpt', '', 'PCA transform.')
 flags.DEFINE_string('slice_ckpt', '', 'Slice transform.')
@@ -238,7 +238,7 @@ def evaluate(dataset, model, sigmas, rng):
   elif FLAGS.loss == 'ssm':
     objective = sliced_score_matching_loss
   elif FLAGS.loss == 'ddpm':
-    objective = diffusion_los
+    objective = diffusion_loss
   elif FLAGS.loss == 'vesde':
     objective = vesde_loss
   else:
@@ -352,7 +352,6 @@ def train(train_batches, valid_batches, sigmas, output_dir=None, verbose=True):
     objective = diffusion_loss
   elif FLAGS.loss == 'vesde':
     objective = vesde_loss
-
   else:
     raise ValueError(f'Unsupported objective {FLAGS.loss}')
 
@@ -534,7 +533,7 @@ def sample(scorenet,
   elif sampling == 'cas':
     sampling_algorithm = ebm_utils.consistent_langevin_dynamics
   elif sampling == 'ddpm':
-    sampling_algorithm = ebm_utils.diffusion_dynamics
+    sampling_algorithm = ebm_utils.diffusion_dynamics_sdedit
   elif sampling == 'vesde':
     sampling_algorithm = ebm_utils.reverse_diffusion_sampler
   else:
@@ -543,8 +542,8 @@ def sample(scorenet,
   init_rng, ld_rng = jax.random.split(rng)
 
   # Initial state has mean=0, var=1.
-  if sampling == 'ddpm' or sampling == 'vesde':
-    init = jax.random.normal(key=init_rng, shape=(num_samples, *sample_shape))
+  if sampling == 'ddpm':
+    init = sigmas[-1] * jax.random.normal(key=init_rng, shape=(num_samples, *sample_shape))
   else:
     rho = jnp.sqrt(12) / 2
     init = jax.random.uniform(key=init_rng,

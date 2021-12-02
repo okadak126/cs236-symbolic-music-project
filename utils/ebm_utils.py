@@ -271,127 +271,6 @@ def consistent_langevin_dynamics(rng,
   return state, ld_metrics
 
 
-
-@partial(jax.jit, static_argnums=(
-    4,
-    5,
-    6,
-    7,
-))
-
-def reverse_diffusion_sampler(rng,
-  model,
-  betas,
-  init,
-  epsilon,
-  T,
-  denoise,
-  infill=False,
-  infill_samples=None,
-  infill_masks=None):
-  """Diffusion dynamics (reverse process decoder).
-  
-  Args:
-    rng: Random number generator key.
-    model: Diffusion probabilistic network.
-    betas: Noise schedule.
-    init: Initial state for Langevin dynamics (usually Gaussian noise).
-    epsilon: Null parameter.
-    T: Null parameter.
-    denoise: Null parameter used in other methods to find EDS.
-    infill: Infill partially complete samples.
-    infill_samples: Partially complete samples to infill.
-    infill_masks: Binary mask for infilling partially complete samples.
-        A zero indicates an element that must be infilled by Langevin dynamics.
-  
-  Returns:
-    state: Final state sampled from Langevin dynamics.
-    collection: Array of state at each step of sampling with shape 
-        (num_sigmas * T + 1 + int(denoise), :).
-    ld_metrics: Metrics collected for each noise level with shape (num_sigmas, T).
-  """
-
-  def batch_mul(a, b):
-    return jax.vmap(lambda a, b: a * b)(a, b)
-  
-  if not infill:
-    infill_samples = jnp.zeros(init.shape)
-    infill_masks = jnp.zeros(init.shape)
-
-  eps = 1e-5 # default set by song
-  T = 1 # default set by song
-  N = 1000
-
-  #alphas = 1 - betas
-  #alphas_prod = jnp.cumprod(alphas)
-  #alphas_prod_prev = jnp.concatenate([jnp.ones((1,)), alphas_prod[:-1]])
-  #assert alphas.shape == alphas_prod.shape == alphas_prod_prev.shape
-
-  # Define timesteps for collection
-  collection_steps = 40
-  sigma_min = 0.01 # default set by song
-  sigma_max = 50   # default set by song
-
-  start = init * (1 - masks) + infill_samples * infill_masks
-  images = np.zeros((collection_steps + 1, *init.shape))
-  collection = jax.ops.index_update(images, jax.ops.index[0, :], start)
-  t_vec = jnp.linspace(T, eps, N).astype(jnp.int32) # This is betas
-  collection_idx = jnp.linspace(1, N, collection_steps).astype(jnp.int32)
-
-  def sample_step(params, i):
-
-    state, rng, collection = params
-
-    std = sigma_min * (sigma_max / sigma_min) ** t_vec[i]
-
-    # Reverse process (reconstruction)
-    diffusion = std * jnp.sqrt(2 * (jnp.log(sigma_max) - jnp.log(sigma_min)))
-    dt = 1 / N
-    G = diffusion * jnp.sqrt(dt)
-
-    score = model(infill_samples, std) 
-
-    rev_f = - batch_mul(G ** 2, score)
-    rev_G = G
-
-    rng, noise_rng = jax.random.split(rng)
-    z = random.normal(noise_rng, infill_samples.shape)
-
-    mean = infill_samples - rev_f
-    next_state = mean + batch_mul(rev_G, z)
-
-    # Infill
-    next_state = next_state * (1 - infill_masks) + infill_samples * infill_masks
-
-    # Collect metrics
-    step = state - next_state
-    grad_norm = jnp.sqrt(jnp.sum(jnp.square(score), axis=1) + 1e-10).mean()
-    noise_norm = jnp.sqrt(jnp.sum(jnp.square(z), axis=1) + 1e-10).mean()
-    step_norm = jnp.sqrt(jnp.sum(jnp.square(step), axis=1) + 1e-10).mean()
-    alpha_prod = std
-    metrics = (grad_norm, step_norm, alpha_prod, noise_norm)
-
-    # Collect samples
-    image_idx = N - i + 1
-    idx_mask = jnp.in1d(collection_idx, image_idx)
-    idx = jnp.sum(jnp.arange(len(collection_idx)) * idx_mask) + 1
-    collection = jax.lax.cond(idx_mask.any(),
-                              lambda op: jax.ops.index_update(
-                                  collection, jax.ops.index[op, :], next_state),
-                              lambda op: collection,
-                              operand=idx)
-
-    next_params = (next_state, rng, collection)
-    return next_params, metrics
-
-  init_params = (init, rng, collection)
-  t_steps = jnp.arange(N - 1, -1, -1)
-  ld_state, ld_metrics = jax.lax.scan(sample_step, init_params, t_steps)
-  state, rng, collection = ld_state
-  ld_metrics = jnp.stack(ld_metrics)
-  ld_metrics = jnp.expand_dims(ld_metrics, 2)
-  return state, collection, ld_metrics
-
 @partial(jax.jit, static_argnums=(
     4,
     5,
@@ -525,6 +404,167 @@ def diffusion_dynamics(rng,
   ld_metrics = jnp.expand_dims(ld_metrics, 2)
   return state, collection, ld_metrics
 
+def diffusion_dynamics_sdedit(rng,
+                       model,
+                       betas,
+                       init,
+                       epsilon,
+                       T,
+                       denoise,
+                       infill=False,
+                       infill_samples=None,
+                       infill_masks=None):
+  """Diffusion dynamics (reverse process decoder).
+  
+  Args:
+    rng: Random number generator key.
+    model: Diffusion probabilistic network.
+    betas: Noise schedule.
+    init: Initial state for Langevin dynamics (usually Gaussian noise).
+    epsilon: Null parameter.
+    T: Null parameter.
+    denoise: Null parameter used in other methods to find EDS.
+    infill: Infill partially complete samples.
+    infill_samples: Partially complete samples to infill.
+    infill_masks: Binary mask for infilling partially complete samples.
+        A zero indicates an element that must be infilled by Langevin dynamics.
+  
+  Returns:
+    state: Final state sampled from Langevin dynamics.
+    collection: Array of state at each step of sampling with shape 
+        (num_sigmas * T + 1 + int(denoise), :).
+    ld_metrics: Metrics collected for each noise level with shape (num_sigmas, T).
+  """
+
+  if not infill:
+    infill_samples = jnp.zeros(init.shape)
+    infill_masks = jnp.zeros(init.shape)
+
+  alphas = 1 - betas
+  alphas_prod = jnp.cumprod(alphas)
+  alphas_prod_prev = jnp.concatenate([jnp.ones((1,)), alphas_prod[:-1]])
+  assert alphas.shape == alphas_prod.shape == alphas_prod_prev.shape
+
+  collection_steps = 40
+
+  x0 = infill_samples
+  x = infill_samples
+  Omega = 1 - infill_masks
+
+  def sample_with_beta(params, t):
+    x, rng, collection = params
+    rng, key = jax.random.split(rng)
+
+    # Noise schedule constants
+    beta = betas[t]
+    alpha = alphas[t]
+    alpha_prod = alphas_prod[t]
+    alpha_prod_prev = alphas_prod_prev[t]
+
+    # Constants for posterior q(x_t|x_0)
+    sqrt_reciprocal_alpha_prod = jnp.sqrt(1 / alpha_prod)
+    sqrt_alpha_prod_m1 = jnp.sqrt(1 - alpha_prod) * sqrt_reciprocal_alpha_prod
+
+    # Create infilling template
+    rng, infill_noise_rng = jax.random.split(rng)
+    infill_noise_cond = t > 0
+    z1 = jax.random.normal(key=infill_noise_rng, shape=x0.shape)
+
+    y = jnp.sqrt(alpha_prod) * x0 + jnp.sqrt(1 - alpha_prod) * z1
+    #y = infill_noise_cond * noisy_y + (1 - infill_noise_cond) * x0
+
+    # Constants for posterior q(x_t-1|x_t, x_0)
+    posterior_mu1 = beta * jnp.sqrt(alpha_prod_prev) / (1 - alpha_prod)
+    posterior_mu2 = (1 - alpha_prod_prev) * jnp.sqrt(alpha) / (1 - alpha_prod)
+
+    # Clipped variance (must be non-zero)
+    posterior_var = beta * (1 - alpha_prod_prev) / (1 - alpha_prod)
+    posterior_var_clipped = jnp.maximum(posterior_var, 1e-20)
+    posterior_log_var = jnp.log(posterior_var_clipped)
+
+    # Noise (can this be the same as the noise generated for infill?)
+    rng, noise_rng = jax.random.split(rng)
+    noise_cond = t > 0
+    #z2 = jax.random.normal(key=noise_rng, shape=x.shape)
+    #z2 = noise_cond * z2 + (1 - noise_cond) * jnp.zeros(x.shape)
+    epsilonz = jnp.exp(0.5 * posterior_log_var) * z1
+
+    # Reverse process (reconstruction)
+    noise_condition_vec = jnp.sqrt(alpha_prod) * jnp.ones((epsilonz.shape[0], 1))
+    noise_condition_vec = noise_condition_vec.reshape(
+        init.shape[0], *([1] * len(init.shape[1:])))
+
+    eps_recon = model(x, noise_condition_vec)
+
+    x_recon = sqrt_reciprocal_alpha_prod * x - sqrt_alpha_prod_m1 * eps_recon
+    x_recon = jnp.clip(x_recon, -1., 1.)
+
+    # Infill
+    x_next = (1 - Omega) * y  + Omega * (posterior_mu1 * x_recon + posterior_mu2 * x + epsilonz)
+
+    # Collect metrics
+    step = x - x_next
+    grad_norm = jnp.sqrt(jnp.sum(jnp.square(eps_recon), axis=1) + 1e-10).mean()
+    noise_norm = jnp.sqrt(jnp.sum(jnp.square(z1), axis=1) + 1e-10).mean()
+    step_norm = jnp.sqrt(jnp.sum(jnp.square(step), axis=1) + 1e-10).mean()
+    metrics = (grad_norm, step_norm, alpha_prod, noise_norm)
+
+    # Collect samples
+    image_idx = len(betas) - t + 1
+    idx_mask = jnp.in1d(collection_idx, image_idx)
+    idx = jnp.sum(jnp.arange(len(collection_idx)) * idx_mask) + 1
+    collection = jax.lax.cond(idx_mask.any(),
+                              lambda op: jax.ops.index_update(
+                                  collection, jax.ops.index[op, :], x_next),
+                              lambda op: collection,
+                              operand=idx)
+
+    next_params = (x_next, rng, collection)
+    return next_params, metrics
+
+  K = 3
+  for k in range(K):
+    print(k)
+    # Assume init is sigma2(t_0)z, gaussian noise already generated with sigma^2
+    rng, z_rng = jax.random.split(rng)
+    z = jax.random.normal(key=z_rng, shape=x0.shape)
+    x = jnp.sqrt(alphas_prod[-1]) * (Omega * x + (1 - Omega) * x0) + jnp.sqrt(1 - alphas_prod[-1]) * z # Omega is the editable region
+
+    images = np.zeros((collection_steps + 1, *init.shape))
+    collection = jax.ops.index_update(images, jax.ops.index[0, :], x)
+    collection_idx = jnp.linspace(1, len(betas),
+                                collection_steps).astype(jnp.int32)
+
+    init_params = (init, rng, collection)
+    beta_steps = jnp.arange(len(betas) - 1, -1, -1)
+    ld_state, ld_metrics = jax.lax.scan(sample_with_beta, init_params, beta_steps)
+    x, rng, collection = ld_state
+    ld_metrics = jnp.stack(ld_metrics)
+    ld_metrics = jnp.expand_dims(ld_metrics, 2)
+
+  return x, collection, ld_metrics # return end values
+
+def collate_sampling_metrics(ld_metrics):
+  """Converts Langevin metrics into TensorBoard-readable format.
+  
+  Args:
+    ld_metrics: A tensor with metrics returned by annealed_langevin_dynamics
+        sampling procedure.
+  """
+  num_metrics, num_sigmas, num_steps = ld_metrics.shape
+  del num_metrics  # unused
+  sampling_metrics = [[] for i in range(num_sigmas)]
+  for i in range(num_sigmas):
+    grad_norm, step_norm, alpha, noise_norm = ld_metrics[:, i, :]
+    for j in range(num_steps):
+      metrics = {
+          'slope': grad_norm[j],
+          'step': step_norm[j],
+          'alpha': alpha[j],
+          'noise': noise_norm[j]
+      }
+      sampling_metrics[i].append(metrics)
+  return sampling_metrics
 
 def reverse_diffusion_sampler(rng,
   model,
@@ -567,18 +607,18 @@ def reverse_diffusion_sampler(rng,
 
   eps = 1e-5 # default set by song
   T = 1 # default set by song
-  N = 500
+  N = 1000
 
   # Define timesteps for collection
   collection_steps = 40
-  sigma_min = 0.01 # default set by song
-  sigma_max = 50   # default set by song
+  sigma_min = 1e-6
+  sigma_max = 10
 
   start = init * (1 - infill_masks) + infill_samples * infill_masks
   images = np.zeros((collection_steps + 1, *init.shape))
   collection = jax.ops.index_update(images, jax.ops.index[0, :], start)
-  t_vec = jnp.linspace(T, eps, N).astype(jnp.int32) # Specific timesteps
-  collection_idx = jnp.linspace(1, N, collection_steps).astype(jnp.int32) # indices where we collect samples
+  t_vec = jnp.linspace(T, eps, N).astype(jnp.int32) # This is betas
+  collection_idx = jnp.linspace(1, N, collection_steps).astype(jnp.int32)
 
   def sample_step(params, i):
 
@@ -635,26 +675,3 @@ def reverse_diffusion_sampler(rng,
   ld_metrics = jnp.stack(ld_metrics)
   ld_metrics = jnp.expand_dims(ld_metrics, 2)
   return state, collection, ld_metrics
-
-
-def collate_sampling_metrics(ld_metrics):
-  """Converts Langevin metrics into TensorBoard-readable format.
-  
-  Args:
-    ld_metrics: A tensor with metrics returned by annealed_langevin_dynamics
-        sampling procedure.
-  """
-  num_metrics, num_sigmas, num_steps = ld_metrics.shape
-  del num_metrics  # unused
-  sampling_metrics = [[] for i in range(num_sigmas)]
-  for i in range(num_sigmas):
-    grad_norm, step_norm, alpha, noise_norm = ld_metrics[:, i, :]
-    for j in range(num_steps):
-      metrics = {
-          'slope': grad_norm[j],
-          'step': step_norm[j],
-          'alpha': alpha[j],
-          'noise': noise_norm[j]
-      }
-      sampling_metrics[i].append(metrics)
-  return sampling_metrics
