@@ -101,7 +101,8 @@ def annealed_langevin_dynamics(rng,
                                denoise,
                                infill=False,
                                infill_samples=None,
-                               infill_masks=None):
+                               infill_masks=None,
+                               K=1):
   """Annealed Langevin dynamics sampling from Song et al.
   
   Args:
@@ -213,7 +214,8 @@ def consistent_langevin_dynamics(rng,
                                  denoise=True,
                                  infill=False,
                                  infill_samples=None,
-                                 infill_masks=None):
+                                 infill_masks=None,
+                                 K=1):
   """Consistent annealed Langevin dynamics sampling from Jolicoeur-Martineau et al.
   
   Args:
@@ -286,7 +288,8 @@ def diffusion_dynamics(rng,
                        denoise,
                        infill=False,
                        infill_samples=None,
-                       infill_masks=None):
+                       infill_masks=None,
+                       K=1):
   """Diffusion dynamics (reverse process decoder).
   
   Args:
@@ -413,7 +416,8 @@ def diffusion_dynamics_sdedit(rng,
                        denoise,
                        infill=False,
                        infill_samples=None,
-                       infill_masks=None):
+                       infill_masks=None,
+                       K = 1):
   """Diffusion dynamics (reverse process decoder).
   
   Args:
@@ -524,7 +528,6 @@ def diffusion_dynamics_sdedit(rng,
 
   K = 3
   for k in range(K):
-    print(k)
     # Assume init is sigma2(t_0)z, gaussian noise already generated with sigma^2
     rng, z_rng = jax.random.split(rng)
     z = jax.random.normal(key=z_rng, shape=x0.shape)
@@ -575,8 +578,9 @@ def reverse_diffusion_sampler(rng,
   denoise,
   infill=False,
   infill_samples=None,
-  infill_masks=None):
-  """Diffusion dynamics (reverse process decoder).
+  infill_masks=None,
+  K=1):
+  """Reverse Diffusion Sampler (for VESDEs)
   
   Args:
     rng: Random number generator key.

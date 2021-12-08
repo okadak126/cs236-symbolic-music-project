@@ -1,38 +1,3 @@
-sample_ncsn.py
-Details
-Activity
-Approvals
-Sharing Info.
-Who has access
-A
-J
-K
-A
-J
-K
-General Info.
-System properties
-Type
-Text
-Size
-23 KB
-Storage used
-23 KBOwned by Stanford University
-Location
-cs236-symbolic-music-project
-Creator
-Andrew Freeman
-Modified
-5:46 PM by me
-Opened
-7:09 PM by me
-Created
-Nov 18, 2021
-Description.
-Add a description
-Download permissions.
-Viewers can download
-
 # Copyright 2021 The Magenta Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -104,6 +69,7 @@ flags.DEFINE_integer('sample_seed', 1,
 flags.DEFINE_string('sampling_dir', 'samples', 'Sampling directory.')
 flags.DEFINE_integer('sample_size', 1000, 'Number of samples.')
 flags.DEFINE_integer('t0', 500, 'step from which we start to sample')
+flags.DEFINE_integer('K', 1, 'number of repeats for sampling')
 
 # Metrics.
 flags.DEFINE_boolean('compute_metrics', False,
@@ -167,9 +133,6 @@ def evaluate(writer, real, collection, baseline, valid_real):
     writer.image('init', im, step=0)
 
   init = collection[0]
-  #prd_init = metrics.precision_recall_distribution(real, init)
-  #prd_perfect = metrics.precision_recall_distribution(real, real)
-
   frechet_dist = 0
   mmd_rbf = 0
   mmd_polynomial = 0
@@ -182,42 +145,6 @@ def evaluate(writer, real, collection, baseline, valid_real):
       continue
 
     for i, samples in enumerate(test_points):
-      # Render samples
-      #if samples.shape[-1] == 2:
-      #  im_buf = plot_utils.scatter_2d(samples)
-      #  im = tf.image.decode_png(im_buf.getvalue(), channels=4)
-      #  writer.image(f'{log_dir}fake', im, step=i)
-
-      # K-means histogram evaluation.
-      #prd_dist = metrics.precision_recall_distribution(real, samples)
-      #buf = io.BytesIO()
-      #metrics.prd.plot([prd_dist, prd_init, prd_perfect],
-      #                 [model, 'noise', 'real'])
-      #plt.savefig(buf, format='png')
-      #plt.close()
-      #buf.seek(0)
-      #im = tf.image.decode_png(buf.getvalue(), channels=4)
-      #writer.image(f'{log_dir}prd', im, step=i)
-
-      #recall, precision = metrics.prd_f_beta_score(prd_dist)  # F8, F1/8 scores.
-      #f1 = metrics.f1_score(precision, recall)
-      #writer.scalar(f'{log_dir}precision', precision, step=i)
-      #writer.scalar(f'{log_dir}recall', recall, step=i)
-      #writer.scalar(f'{log_dir}f1', f1, step=i)
-
-      # Nearest neighbor evaluation.
-      #improved_p, improved_r = metrics.precision_recall(real, samples)
-      #improved_f1 = metrics.f1_score(improved_p, improved_r)
-      #writer.scalar(f'{log_dir}improved_precision', improved_p, step=i)
-      #writer.scalar(f'{log_dir}improved_recall', improved_r, step=i)
-      #writer.scalar(f'{log_dir}improved_f1', improved_f1, step=i)
-
-      #realism_scores = metrics.realism_scores(real, samples)
-      #realism = realism_scores.mean()
-      #writer.scalar(f'{log_dir}ipr_realism', realism, step=i)
-
-      #ndb_over_k = metrics.ndb_score(real, samples, k=50)
-      #writer.scalar(f'{log_dir}ndb', ndb_over_k, step=i)
 
       # Distance evaluation.
       frechet_dist = metrics.frechet_distance(real, samples)
@@ -235,13 +162,6 @@ def evaluate(writer, real, collection, baseline, valid_real):
   writer.flush()
 
   stats = {
-      #'precision': precision,
-      #'recall': recall,
-      #'f1': f1,
-      #'improved_precision': improved_p,
-      #'improved_recall': improved_r,
-      #'improved_f1': improved_f1,
-      #'realism': realism,
       'frechet_dist': frechet_dist,
       'mmd_rbf': mmd_rbf,
       'mmd_polynomial': mmd_polynomial
@@ -284,8 +204,6 @@ def perturb_sample(batch,
                                    shape=labels.shape,
                                    minval=alphas_prod[labels - 1],
                                    maxval=alphas_prod[labels])
-  # else:
-  #   used_alphas = alphas_prod[labels]
 
   used_alphas = used_alphas.reshape(batch.shape[0],
                                     *([1] * len(batch.shape[1:])))
@@ -351,7 +269,8 @@ def infill_samples(samples, masks, rng_seed=1):
                                                          FLAGS.denoise,
                                                          True,
                                                          infill_samples=samples,
-                                                         infill_masks=masks)
+                                                         infill_masks=masks,
+                                                         K = FLAGS.K)
   ld_metrics = ebm_utils.collate_sampling_metrics(ld_metrics)
 
   return generated, collection, ld_metrics
